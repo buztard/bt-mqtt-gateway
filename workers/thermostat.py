@@ -15,6 +15,12 @@ HOLD_BOOST = "boost"
 HOLD_COMFORT = "comfort"
 HOLD_ECO = "eco"
 
+PRESET_NONE = "none"
+PRESET_AWAY = "away"
+PRESET_BOOST = "boost"
+PRESET_COMFORT = "comfort"
+PRESET_ECO = "eco"
+
 SENSOR_CLIMATE = "climate"
 SENSOR_WINDOW = "window_open"
 SENSOR_BATTERY = "low_battery"
@@ -93,6 +99,8 @@ class ThermostatWorker(BaseWorker):
             "away_mode_command_topic": self.format_prefixed_topic(name, "away", "set"),
             "hold_state_topic": self.format_prefixed_topic(name, "hold"),
             "hold_command_topic": self.format_prefixed_topic(name, "hold", "set"),
+            "preset_mode_state_topic": self.format_prefixed_topic(name, "preset_mode"),
+            "preset_mode_command_topic": self.format_prefixed_topic(name, "preset_mode", "set"),
             "json_attributes_topic": self.format_prefixed_topic(
                 name, "json_attributes"
             ),
@@ -101,6 +109,7 @@ class ThermostatWorker(BaseWorker):
             "temp_step": 0.5,
             "modes": [STATE_HEAT, STATE_AUTO, STATE_OFF],
             "hold_modes": [HOLD_BOOST, HOLD_COMFORT, HOLD_ECO],
+            "preset_modes": [PRESET_AWAY, PRESET_BOOST, PRESET_COMFORT, PRESET_ECO],
             "device": device,
         }
         if data.get("discovery_temperature_topic"):
@@ -253,6 +262,22 @@ class ThermostatWorker(BaseWorker):
                 logger.log_exception(_LOGGER, "Invalid hold setting %s", value)
                 return []
 
+        elif method == "preset_mode":
+            if value == PRESET_BOOST:
+                method = "mode"
+                value = Mode.Boost
+            elif value in (PRESET_COMFORT, PRESET_ECO):
+                method = "preset"
+            elif value == PRESET_AWAY:
+                method = "mode"
+                value = Mode.Away
+            elif value == PRESET_NONE:
+                method = "mode"
+                value = default_fallback_mode
+            else:
+                logger.log_exception(_LOGGER, "Invalid preset_mode setting %s", value)
+                return []
+
         elif method == "away":
             method = "mode"
             if value == 'OFF':
@@ -272,7 +297,7 @@ class ThermostatWorker(BaseWorker):
         )
         try:
             if method == "preset":
-                if value == HOLD_COMFORT:
+                if value in (HOLD_COMFORT, PRESET_COMFORT):
                     retry(thermostat.activate_comfort, retries=self.command_retries, exception_type=btle.BTLEException)()
                 else:
                     retry(thermostat.activate_eco, retries=self.command_retries, exception_type=btle.BTLEException)()
@@ -325,17 +350,23 @@ class ThermostatWorker(BaseWorker):
 
         if thermostat.mode == Mode.Boost:
             hold = HOLD_BOOST
+            preset = PRESET_BOOST
         elif thermostat.mode == Mode.Away:
             hold = "off"
+            preset = PRESET_AWAY
         elif thermostat.target_temperature == thermostat.comfort_temperature:
             hold = HOLD_COMFORT
+            preset = PRESET_COMFORT
         elif thermostat.target_temperature == thermostat.eco_temperature:
             hold = HOLD_ECO
+            preset = PRESET_ECO
         else:
             hold = HOLD_NONE
+            preset = PRESET_NONE
 
         ret.append(MqttMessage(topic=self.format_topic(name, "mode"), payload=mode))
         ret.append(MqttMessage(topic=self.format_topic(name, "hold"), payload=hold))
+        ret.append(MqttMessage(topic=self.format_topic(name, "preset_mode"), payload=preset))
         ret.append(
             MqttMessage(
                 topic=self.format_topic(name, "away"),
